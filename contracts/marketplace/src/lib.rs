@@ -165,7 +165,9 @@ pub struct Listing {
     pub id: u64,
     pub seller: Address,
     pub bot_id: u64,
-    pub bot_tier: BotTier,
+    /// Historical display hint only. The authoritative current tier is the
+    /// bot_nft record for `bot_id`.
+    pub tier_at_listing: BotTier,
     pub price: i128,
     pub currency: Address,
     pub listed_at: u64,
@@ -433,7 +435,7 @@ impl MarketplaceContract {
             Self::clear_lock(&env);
             return Err(MarketplaceError::NotBotOwner);
         }
-        let bot_tier = bot.tier;
+        let tier_at_listing = bot.tier;
 
         // Escrow the bot into the marketplace. A failure here is a genuine
         // transfer failure, surfaced as BotTransferFailed.
@@ -456,7 +458,7 @@ impl MarketplaceContract {
             id: listing_id,
             seller: seller.clone(),
             bot_id,
-            bot_tier,
+            tier_at_listing,
             price,
             currency: currency.clone(),
             listed_at: env.ledger().timestamp(),
@@ -689,7 +691,7 @@ impl MarketplaceContract {
             .persistent()
             .remove(&DataKey::BotListing(listing.bot_id));
         Self::remove_active_listing(&env, listing_id);
-        if let Err(e) = Self::record_sale(&env, listing.bot_tier, listing.price) {
+        if let Err(e) = Self::record_sale(&env, listing.tier_at_listing, listing.price) {
             Self::clear_lock(&env);
             return Err(e);
         }
@@ -913,10 +915,26 @@ impl MarketplaceContract {
     /// assigned returns `ListingNotFound`. This is intentional (see module
     /// docs): auditability over hiding.
     pub fn get_listing(env: Env, listing_id: u64) -> Result<Listing, MarketplaceError> {
-        env.storage()
+        let mut listing: Listing = env
+            .storage()
             .persistent()
             .get(&DataKey::Listing(listing_id))
-            .ok_or(MarketplaceError::ListingNotFound)
+            .ok_or(MarketplaceError::ListingNotFound)?;
+
+        if listing.active {
+            let bot_nft: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::Config)
+                .map(|config: Config| config.bot_nft)
+                .ok_or(MarketplaceError::NotInitialized)?;
+            if let Ok(bot) = BotNFTContractClient::new(&env, &bot_nft).try_get_bot(&listing.bot_id) {
+                if let Ok(bot) = bot {
+                    listing.tier_at_listing = bot.tier;
+                }
+            }
+        }
+        Ok(listing)
     }
 
     /// Return the active listing ID for a bot, if one exists. Returns
@@ -1048,7 +1066,7 @@ impl MarketplaceContract {
                 continue;
             }
             if let Some(expected_tier) = tier {
-                if listing.bot_tier != expected_tier {
+                if listing.tier_at_listing != expected_tier {
                     continue;
                 }
             }
@@ -1363,7 +1381,7 @@ impl MarketplaceContract {
 
     /// A new active listing can only lower the floor: one comparison.
     fn on_listing_added(env: &Env, listing: &Listing) {
-        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        let mut stats = Self::read_tier_stats(env, listing.tier_at_listing);
         if stats.floor_price == 0 || listing.price < stats.floor_price {
             stats.floor_price = listing.price;
             stats.floor_listing_id = listing.id;
@@ -1374,9 +1392,9 @@ impl MarketplaceContract {
     /// Called after `listing` has left the active index (sold, cancelled,
     /// deactivated). The floor is rescanned only if this listing held it.
     fn on_listing_removed(env: &Env, listing: &Listing) {
-        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        let mut stats = Self::read_tier_stats(env, listing.tier_at_listing);
         if stats.floor_listing_id == listing.id {
-            let (price, id) = Self::scan_floor(env, listing.bot_tier);
+            let (price, id) = Self::scan_floor(env, listing.tier_at_listing);
             stats.floor_price = price;
             stats.floor_listing_id = id;
             Self::write_tier_stats(env, &stats);
@@ -1385,13 +1403,13 @@ impl MarketplaceContract {
 
     /// Called after an active listing's price changed and was persisted.
     fn on_price_changed(env: &Env, listing: &Listing) {
-        let mut stats = Self::read_tier_stats(env, listing.bot_tier);
+        let mut stats = Self::read_tier_stats(env, listing.tier_at_listing);
         if stats.floor_price == 0 || listing.price < stats.floor_price {
             stats.floor_price = listing.price;
             stats.floor_listing_id = listing.id;
             Self::write_tier_stats(env, &stats);
         } else if stats.floor_listing_id == listing.id {
-            let (price, id) = Self::scan_floor(env, listing.bot_tier);
+            let (price, id) = Self::scan_floor(env, listing.tier_at_listing);
             stats.floor_price = price;
             stats.floor_listing_id = id;
             Self::write_tier_stats(env, &stats);
@@ -1425,7 +1443,7 @@ impl MarketplaceContract {
                 .persistent()
                 .get::<_, Listing>(&DataKey::Listing(id))
             {
-                if l.active && l.bot_tier == tier && (best.0 == 0 || l.price < best.0) {
+                if l.active && l.tier_at_listing == tier && (best.0 == 0 || l.price < best.0) {
                     best = (l.price, l.id);
                 }
             }
@@ -1513,7 +1531,7 @@ impl MarketplaceContract {
             .get(&DataKey::AllowedCurrencies);
         if let Some(currencies) = allowed {
             for c in currencies.iter() {
-                if c == currency {
+                if c == *currency {
                     return true;
                 }
             }
@@ -1538,7 +1556,7 @@ impl MarketplaceContract {
             .unwrap_or_else(|| Vec::new(env));
 
         for c in allowed.iter() {
-            if c == &currency {
+            if c == currency {
                 return Ok(());
             }
         }
@@ -1573,7 +1591,7 @@ impl MarketplaceContract {
 
         let mut new_allowed: Vec<Address> = Vec::new(env);
         for c in allowed.iter() {
-            if c != &currency {
+            if c != currency {
                 new_allowed.push_back(c);
             }
         }
@@ -1620,3 +1638,4 @@ impl MarketplaceContract {
 
 #[cfg(test)]
 mod test;
+

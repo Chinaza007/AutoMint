@@ -3,7 +3,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
-    Vec,
+    Vec, IntoVal,
 };
 
 /// The one bot_nft entry point accrual calls. Declared locally rather than
@@ -152,11 +152,70 @@ impl AccrualContract {
 
         env.storage().instance().set(&DataKey::Initialized, &true);
 
+        // Register this contract with bot_nft so minting and transfers can
+        // settle an existing user's old rate before changing it.
+        let mut args = Vec::new(&env);
+        args.push_back(env.current_contract_address().into_val(&env));
+        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
+            &bot_nft,
+            &soroban_sdk::Symbol::new(&env, "set_accrual"),
+            args,
+        );
+
         env.storage()
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 
         Ok(())
+    }
+
+    /// Settle time earned at the current rate, then load the user's new rate
+    /// from bot_nft. Missing users are intentionally a no-op: bot minting must
+    /// work before a user starts accrual.
+    pub fn sync_rate(env: Env, user: Address) -> Result<u64, AccrualError> {
+        let Some(mut accrual) = env
+            .storage()
+            .persistent()
+            .get::<_, UserAccrual>(&DataKey::UserAccrual(user.clone()))
+        else {
+            return Ok(0);
+        };
+
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(accrual.last_claim_ts);
+        let settled = elapsed.saturating_mul(accrual.rate) / 3600;
+        accrual.carry_points = accrual.carry_points.saturating_add(settled);
+        accrual.lifetime_points = accrual.lifetime_points.saturating_add(settled);
+        accrual.last_claim_ts = now;
+
+        if settled > 0 {
+            let registry: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::Registry)
+                .ok_or(AccrualError::NotInitialized)?;
+            let reg_client = automint_registry::RegistryContractClient::new(&env, &registry);
+            let reg_res = reg_client.try_add_points(&user, &settled);
+            if reg_res.is_err() || matches!(&reg_res, Ok(Err(_))) {
+                return Err(AccrualError::RegistryCallFailed);
+            }
+        }
+
+        let bot_nft: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BotNft)
+            .ok_or(AccrualError::NotInitialized)?;
+        accrual.rate = BotNftClient::new(&env, &bot_nft).get_user_total_rate(&user);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserAccrual(user.clone()), &accrual);
+        env.storage().persistent().extend_ttl(
+            &DataKey::UserAccrual(user),
+            LEDGER_THRESHOLD,
+            LEDGER_BUMP,
+        );
+        Ok(settled)
     }
 
     /// Starts accruing for `user` at the combined rate of the bots they own,
@@ -1296,7 +1355,7 @@ mod auth_tests {
             &String::from_str(&env, "AutoMint Token"),
             &String::from_str(&env, "AMT"),
         );
-        bot_nft.initialize(&admin, &registry_id);
+        bot_nft.initialize(&admin, &registry_id, &token_id);
         client.initialize(&admin, &bot_nft_id, &registry_id, &100_u64);
 
         Ctx {

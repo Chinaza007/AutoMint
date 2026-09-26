@@ -43,7 +43,7 @@ export default function BotListingCard({
   // needs `bot` (a separate per-row lookup) just to know the tier — `bot`
   // is still used below for nickname/id/accrual-rate, which the listing
   // itself doesn't carry.
-  const tier = (listing.bot_tier ?? bot?.tier ?? "Basic") as BotTier;
+  const tier = (bot?.tier ?? listing.tier_at_listing ?? "Basic") as BotTier;
   const tierName = BOT_TIER_NAMES[tier] ?? "Unknown";
   const tierColor = BOT_TIER_COLORS[tier] ?? "text-muted";
   const tierBg = BOT_TIER_BG_COLORS[tier] ?? "bg-muted/20";

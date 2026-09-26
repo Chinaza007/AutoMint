@@ -198,7 +198,7 @@ fn test_get_listing_not_found() {
 fn test_double_initialize_fails() {
     let h = setup();
     assert_eq!(
-        h.mkt.try_initialize(&h.admin, &h.bot.address, &250u32),
+        h.mkt.try_initialize(&h.admin, &h.bot.address, &250u32, &0u32),
         Err(Ok(MarketplaceError::AlreadyInitialized))
     );
 }
@@ -611,7 +611,7 @@ mod auth_tests {
         let admin = Address::generate(&h.env);
 
         h.env.mock_auths(&[]);
-        let result = mkt.try_initialize(&admin, &h.bot.address, &250u32);
+        let result = mkt.try_initialize(&admin, &h.bot.address, &250u32, &0u32);
         assert!(result.is_err());
     }
 
@@ -631,7 +631,7 @@ mod auth_tests {
                 sub_invokes: &[],
             },
         }]);
-        let result = mkt.try_initialize(&admin, &h.bot.address, &250u32);
+        let result = mkt.try_initialize(&admin, &h.bot.address, &250u32, &0u32);
         assert!(result.is_ok());
     }
 
@@ -1177,7 +1177,7 @@ fn test_index_consistency_after_30_mixed_operations() {
 fn test_error_variant_already_initialized() {
     let h = setup();
     assert_eq!(
-        h.mkt.try_initialize(&h.admin, &h.bot.address, &250u32),
+        h.mkt.try_initialize(&h.admin, &h.bot.address, &250u32, &0u32),
         Err(Ok(MarketplaceError::AlreadyInitialized))
     );
 }
@@ -1726,7 +1726,7 @@ fn test_bot_nft_validation_on_initialize() {
     let marketplace_id = env.register_contract(None, MarketplaceContract);
     let mkt = MarketplaceContractClient::new(&env, &marketplace_id);
 
-    let result = mkt.try_initialize(&admin, &invalid_addr, &250u32);
+    let result = mkt.try_initialize(&admin, &invalid_addr, &250u32, &0u32);
     assert_eq!(
         result,
         Err(Ok(MarketplaceError::InvalidBotNft)),
@@ -2106,3 +2106,5 @@ fn test_admin_transfer_takes_two_steps() {
     assert_eq!(h.mkt.config().admin, new_admin);
     assert_eq!(h.mkt.pending_admin(), None);
 }
+
+

@@ -319,7 +319,7 @@ export function parseListing(
     id: toBigInt(rawData.id, "id"),
     seller: String(rawData.seller ?? ""),
     bot_id: toBigInt(rawData.bot_id, "bot_id"),
-    bot_tier: parseBotTier(rawData.bot_tier, "parseListing"),
+    tier_at_listing: parseBotTier(rawData.tier_at_listing, "parseListing"),
     price: toBigInt(rawData.price, "price"),
     currency: String(rawData.currency ?? ""),
     listed_at: toBigInt(rawData.listed_at, "listed_at"),

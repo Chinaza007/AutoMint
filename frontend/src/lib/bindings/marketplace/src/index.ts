@@ -47,7 +47,7 @@ export type DataKey = {tag: "Listing", values: readonly [u64]} | {tag: "ActiveLi
 export interface Listing {
   active: boolean;
   bot_id: u64;
-  bot_tier: BotTier;
+  tier_at_listing: BotTier;
   currency: string;
   id: u64;
   listed_at: u64;

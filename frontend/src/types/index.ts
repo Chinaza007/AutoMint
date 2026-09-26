@@ -40,7 +40,8 @@ export interface MarketplaceListing {
   id: bigint;
   seller: string;
   bot_id: bigint;
-  bot_tier: BotTier;
+  /** Historical display hint; the bot record is authoritative. */
+  tier_at_listing: BotTier;
   price: bigint;
   currency: string;
   listed_at: bigint;

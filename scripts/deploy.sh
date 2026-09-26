@@ -66,7 +66,7 @@ MANIFEST_DIR="$REPO_ROOT/deployments"
 MANIFEST="$MANIFEST_DIR/$NETWORK.json"
 # Registry → bot_nft → accrual → marketplace → token. bot_nft needs the registry
 # id; marketplace needs the bot_nft id. accrual/token are independent.
-CONTRACT_NAMES=(registry bot_nft accrual marketplace token)
+CONTRACT_NAMES=(registry token bot_nft accrual marketplace)
 
 # Locate a compiled wasm across possible stellar-cli build targets
 # (wasm32v1-none for newer stellar-cli, wasm32-unknown-unknown, or a find
@@ -396,8 +396,14 @@ deploy_contract registry
 init_contract registry initialize --admin "$ADMIN_ADDRESS"
 verify_contract registry
 
+deploy_contract token
+init_contract token initialize --admin "$ADMIN_ADDRESS" \
+  --decimal 7 --name "AutoMint Token" --symbol "AMT"
+verify_contract token
+
 deploy_contract bot_nft
-init_contract bot_nft initialize --admin "$ADMIN_ADDRESS" --registry "$(resolve_id registry)"
+init_contract bot_nft initialize --admin "$ADMIN_ADDRESS" --registry "$(resolve_id registry)" \
+  --payment-token "$(resolve_id token)"
 verify_contract bot_nft
 
 deploy_contract accrual
@@ -410,11 +416,6 @@ init_contract marketplace initialize --admin "$ADMIN_ADDRESS" \
   --bot-nft "$(resolve_id bot_nft)" --fee-bps 250
 verify_contract marketplace
 
-deploy_contract token
-init_contract token initialize --admin "$ADMIN_ADDRESS" \
-  --decimal 7 --name "AutoMint Token" --symbol "AMT"
-verify_contract token
-
 # 3b. Wire the Accrual contract as the Token's admin so claims can mint AMT.
 wire_token_admin
 
@@ -422,3 +423,4 @@ wire_token_admin
 write_env_local
 
 log "Deployment complete. Manifest: $MANIFEST"
+
